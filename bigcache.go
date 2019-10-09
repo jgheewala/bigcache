@@ -23,12 +23,18 @@ type BigCache struct {
 	close        chan struct{}
 }
 
+// Response will contain metadata about the entry for which GetWithInfo(key) was called
+type Response struct {
+	EntryStatus RemoveReason
+}
+
 // RemoveReason is a value used to signal to the user why a particular key was removed in the OnRemove callback.
 type RemoveReason uint32
 
 const (
+	_ RemoveReason = iota
 	// Expired means the key is past its LifeWindow.
-	Expired RemoveReason = iota
+	Expired
 	// NoSpace means the key is the oldest and the cache size was at its maximum when Set was called, or the
 	// entry exceeded the maximum shard size.
 	NoSpace
@@ -44,7 +50,7 @@ func NewBigCache(config Config) (*BigCache, error) {
 func newBigCache(config Config, clock clock) (*BigCache, error) {
 
 	if !isPowerOfTwo(config.Shards) {
-		return nil, fmt.Errorf("Shards number must be power of two")
+		return nil, fmt.Errorf("shards number must be power of two")
 	}
 
 	if config.Hasher == nil {
@@ -110,6 +116,16 @@ func (c *BigCache) Get(key string) ([]byte, error) {
 	return shard.get(key, hashedKey)
 }
 
+// GetWithInfo reads entry for the key.
+// It returns an ErrEntryNotFound when
+// no entry exists for the given key.
+// It also returns Response with entry status information
+func (c *BigCache) GetWithInfo(key string) ([]byte, Response, error) {
+	hashedKey := c.hash.Sum64(key)
+	shard := c.getShard(hashedKey)
+	return shard.getWithInfo(key, hashedKey)
+}
+
 // Set saves entry under the key
 func (c *BigCache) Set(key string, entry []byte) error {
 	hashedKey := c.hash.Sum64(key)
@@ -121,7 +137,7 @@ func (c *BigCache) Set(key string, entry []byte) error {
 func (c *BigCache) Delete(key string) error {
 	hashedKey := c.hash.Sum64(key)
 	shard := c.getShard(hashedKey)
-	return shard.del(key, hashedKey)
+	return shard.del(hashedKey)
 }
 
 // Reset empties all cache shards
